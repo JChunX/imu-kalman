@@ -1,6 +1,6 @@
 # IMU Kalman Filter
 
-## Build
+## __Build__
 
 [Setup environment for ESP32 development](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html#installation)
 
@@ -38,3 +38,9 @@ Then flash:
 ```bash
 idf.py -p PORT [-b BAUD] flash
 ```
+
+## __Credit__
+
+[I2Cbus](https://github.com/natanaeljr/esp32-I2Cbus)
+
+[MPU Driver](https://github.com/natanaeljr/esp32-MPU-driver)
