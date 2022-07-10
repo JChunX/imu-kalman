@@ -2,7 +2,7 @@
 #define KALMAN_FILTER_H
 
 #include <functional>
-#include "state_estimator.h"
+#include "StateEstimator.h"
 
 template <int N, int M>
 class KalmanFilter: public StateEstimator<N, M>
@@ -23,10 +23,10 @@ public:
                     std::function<Eigen::Matrix<double, N, N>(double)> A_ptr,
                     const Eigen::Matrix<double, M,N> &H);
 
-    void predict(double dt);
-    void update(const Eigen::Vector<double, M> &z);
-    void update(const Eigen::Vector<double, M> &z, const Eigen::Matrix<double, M, M> &R);
-    Eigen::Vector<double, N> getState();
+    void Predict(double dt);
+    void Update(const Eigen::Vector<double, M> &z);
+    void Update(const Eigen::Vector<double, M> &z, const Eigen::Matrix<double, M, M> &R);
+    Eigen::Vector<double, N> GetState();
 };
 
 template <int N, int M>
@@ -47,7 +47,7 @@ KalmanFilter<N, M>::KalmanFilter(const Eigen::Vector<double, N> &x_init,
 }
 
 template <int N, int M>
-void KalmanFilter<N, M>::predict(double dt)
+void KalmanFilter<N, M>::Predict(double dt)
 {
     Eigen::Matrix<double, N, N>A = A_ptr(dt);
     this->x = A * this->x;
@@ -55,13 +55,13 @@ void KalmanFilter<N, M>::predict(double dt)
 }
 
 template <int N, int M>
-void KalmanFilter<N, M>::update(const Eigen::Vector<double, M> &z)
+void KalmanFilter<N, M>::Update(const Eigen::Vector<double, M> &z)
 {
-    update(z, R);
+    Update(z, R);
 }
 
 template <int N, int M>
-void KalmanFilter<N, M>::update(const Eigen::Vector<double, M> &z, const Eigen::Matrix<double, M, M> &R)
+void KalmanFilter<N, M>::Update(const Eigen::Vector<double, M> &z, const Eigen::Matrix<double, M, M> &R)
 {
     K = P * H.transpose() * (H * P * H.transpose() + R).inverse();
     this->x = this->x + K * (z - H * this->x);
@@ -69,7 +69,7 @@ void KalmanFilter<N, M>::update(const Eigen::Vector<double, M> &z, const Eigen::
 }
 
 template <int N, int M>
-Eigen::Vector<double, N> KalmanFilter<N, M>::getState()
+Eigen::Vector<double, N> KalmanFilter<N, M>::GetState()
 {
     return this->x;
 }
