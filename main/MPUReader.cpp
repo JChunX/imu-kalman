@@ -1,7 +1,14 @@
 #include "MPUReader.h"
 
 MPUReader::MPUReader(QueueHandle_t imu_measurement_queue) 
-    : imu_measurement_queue(imu_measurement_queue)
+    : MPUReader(imu_measurement_queue, 100)
+{
+
+}
+
+MPUReader::MPUReader(QueueHandle_t imu_measurement_queue, uint16_t sample_rate)
+    : imu_measurement_queue(imu_measurement_queue),
+      kSampleRate(sample_rate)
 {
 
 }
@@ -25,18 +32,11 @@ esp_err_t MPUReader::Configure(mpud::accel_fs_t accelFS, mpud::gyro_fs_t gyroFS,
 
 void MPUReader::Calibrate()
 {
-    constexpr uint16_t sample_rate = 1000;
-    constexpr mpud::dlpf_t DLPF = mpud::DLPF_188HZ;
-    constexpr mpud::accel_fs_t AccelFS = mpud::ACCEL_FS_16G;
-    constexpr mpud::gyro_fs_t GyroFS   = mpud::GYRO_FS_250DPS;
-
-    Configure(AccelFS, GyroFS, DLPF, sample_rate);
-
     ESP_LOGI(TAG, "Beginning Calibration");
     constexpr int samples_per_axis = 50;
     constexpr int samples_per_axis_3x = samples_per_axis * 3;
-
-    Eigen::VectorXd ground_truth;
+    
+    Eigen::VectorXd ground_truth(samples_per_axis_3x);
     for (int i = 0; i < samples_per_axis_3x; i++)
     {
         if (i < samples_per_axis)
@@ -59,12 +59,13 @@ void MPUReader::Calibrate()
     for (int i=0; i<6; i++)
     {
         ESP_LOGI(TAG, "Move IMU to position %d", i+1);
-        vTaskDelay(2500 / portTICK_PERIOD_MS);
+        vTaskDelay(4000 / portTICK_PERIOD_MS);
         ESP_LOGI(TAG, "Collecting %d samples", samples_per_axis);
         int sample_count = 0;
         while (sample_count < samples_per_axis)
         {
             IMUMeasurement imu_meas;
+            vTaskDelay(1);
             if (xQueueReceive(imu_measurement_queue,&imu_meas,0) == pdTRUE)
             {
                 Eigen::Vector3d accel_meas = imu_meas.accel_meas;
@@ -99,7 +100,7 @@ void MPUReader::Calibrate()
         }
     }
 
-    Eigen::MatrixXd Ax;
+    Eigen::MatrixXd Ax(samples_per_axis_3x, 2);
     for (int i = 0; i < samples_per_axis_3x; i++)
     {
         Ax(i, 0) = 1;
@@ -108,7 +109,7 @@ void MPUReader::Calibrate()
     Eigen::VectorXd beta_x{0,1};
     LinearLeastSquares(Ax, ground_truth, beta_x); 
 
-    Eigen::MatrixXd Ay;
+    Eigen::MatrixXd Ay(samples_per_axis_3x, 2);
     for (int i = 0; i < samples_per_axis_3x; i++)
     {
         Ay(i, 0) = 1;
@@ -117,7 +118,7 @@ void MPUReader::Calibrate()
     Eigen::VectorXd beta_y{0,1};
     LinearLeastSquares(Ay, ground_truth, beta_y);
 
-    Eigen::MatrixXd Az;
+    Eigen::MatrixXd Az(samples_per_axis_3x, 2);
     for (int i = 0; i < samples_per_axis_3x; i++)
     {
         Az(i, 0) = 1;
@@ -129,31 +130,28 @@ void MPUReader::Calibrate()
     accel_calib_weights = {beta_x(1), beta_y(1), beta_z(1)};
     accel_calib_biases = {beta_x(0), beta_y(0), beta_z(0)};
 
-    ESP_LOGI(TAG, "Calibrating Gyro..");
-    vTaskDelay(500 / portTICK_PERIOD_MS);
+    printf("Accel Calibration Weights: %f, %f, %f\n", accel_calib_weights[0], accel_calib_weights[1], accel_calib_weights[2]);
+    printf("Accel Calibration Biases: %f, %f, %f\n", accel_calib_biases[0], accel_calib_biases[1], accel_calib_biases[2]);
 
-    int gyro_samples = 500;
+    ESP_LOGI(TAG, "Calibrating Gyro..");
+
+    int gyro_samples = 100;
     gyro_offsets = {0,0,0};
     int gyro_sample_count = 0;
-    while(1)
+    while(gyro_sample_count < gyro_samples)
     {
         IMUMeasurement imu_meas;
+        vTaskDelay(1);
         if (xQueueReceive(imu_measurement_queue,&imu_meas,0) == pdTRUE)
         {
-            Eigen::Vector3d gyro_meas = imu_meas.gyro_meas;
-            gyro_offsets += gyro_meas;
+            gyro_offsets += imu_meas.gyro_meas;
         }
         gyro_sample_count++;
-        if (gyro_sample_count >= gyro_samples)
-        {
-            break;
-        }
+        
     }
     gyro_offsets /= gyro_samples;
 
     ESP_LOGI(TAG, "Calibration complete");
-
-    Configure(); // return to default settings
 
     calib_available = true;
 }
@@ -182,6 +180,11 @@ void MPUReader::IMUReadTask()
     ESP_LOGI(TAG, "MPU Self-Test result: Gyro=%s Accel=%s",  
              (retSelfTest & mpud::SELF_TEST_GYRO_FAIL ? "FAIL" : "OK"),
              (retSelfTest & mpud::SELF_TEST_ACCEL_FAIL ? "FAIL" : "OK"));
+
+    mpud::raw_axes_t accelBias, gyroBias;
+    ESP_ERROR_CHECK(MPU.computeOffsets(&accelBias, &gyroBias));
+    ESP_ERROR_CHECK(MPU.setAccelOffset(accelBias));
+    ESP_ERROR_CHECK(MPU.setGyroOffset(gyroBias));
 
     ESP_ERROR_CHECK(MPU.setInterruptEnabled(mpud::INT_EN_RAWDATA_READY));
 
@@ -260,7 +263,8 @@ void MPUReader::IMUReadTask()
 
         if(xQueueSend(imu_measurement_queue,&imu_meas,0) != pdTRUE)
         {
-            printf("queue full\n");
+            printf("Failed to send IMU measurement to queue\n");
+            xQueueReceive(imu_measurement_queue,&imu_meas,0);
         }
 
         vTaskDelay(1000 / (2 * portTICK_PERIOD_MS * kSampleRate));
@@ -271,4 +275,15 @@ void MPUReader::LinearLeastSquares(const Eigen::MatrixXd& A, const Eigen::Vector
 {
     //https://blog.fearcat.in/a?ID=01650-bd7947cb-98f1-4729-ab1b-e1b521ef9b68
     x = A.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(b);
+}
+
+void MPUReader::SetCalibration(
+    const Eigen::Vector3d& accel_calib_weights,
+    const Eigen::Vector3d& accel_calib_biases,
+    const Eigen::Vector3d& gyro_offsets)
+{
+    this->accel_calib_weights = accel_calib_weights;
+    this->accel_calib_biases = accel_calib_biases;
+    this->gyro_offsets = gyro_offsets;
+    calib_available = true;
 }
