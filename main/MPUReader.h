@@ -9,43 +9,53 @@
 #include "mpu/types.hpp"  
 #include "I2Cbus.hpp"
 
+struct IMUMeasurement {
+    Eigen::Vector3d accel_meas;
+    Eigen::Vector3d gyro_meas;
+};
 
 class MPUReader
 {
 private:
     MPU_t MPU;
 
-    constexpr gpio_num_t SDA = GPIO_NUM_21;
-    constexpr gpio_num_t SCL = GPIO_NUM_22;
-    constexpr uint32_t CLOCK_SPEED = 400000;
-    constexpr uint16_t kSampleRate = 500;
+    static constexpr gpio_num_t SDA = GPIO_NUM_21;
+    static constexpr gpio_num_t SCL = GPIO_NUM_22;
 
-    constexpr mpud::accel_fs_t kAccelFS = mpud::ACCEL_FS_4G;
-    constexpr mpud::gyro_fs_t kGyroFS = mpud::GYRO_FS_500DPS;
-    constexpr mpud::dlpf_t kDLPF = mpud::DLPF_98HZ;
-    constexpr uint16_t kFIFOPacketSize = 12;
-    constexpr float kDeltaTime = 1.f / kSampleRate;
+    static constexpr uint32_t CLOCK_SPEED = 400000;
+    static constexpr uint16_t kSampleRate = 62;
+    static constexpr mpud::accel_fs_t kAccelFS = mpud::ACCEL_FS_4G;
+    static constexpr mpud::gyro_fs_t kGyroFS = mpud::GYRO_FS_500DPS;
+    static constexpr mpud::dlpf_t kDLPF = mpud::DLPF_98HZ;
+    static constexpr uint16_t kFIFOPacketSize = 12;
+    static constexpr float kDeltaTime = 1.f / kSampleRate;
 
-    bool new_accel_data = false;
-    bool new_gyro_data = false;
-    Eigen::Vector3d accel_meas{0, 0, 0};
-    Eigen::Vector3d gyro_meas{0, 0, 0};
+    static constexpr const char* TAG = "MPUReader";
 
     bool calib_available = false;
     Eigen::Vector3d accel_calib_weights{1, 1, 1};
     Eigen::Vector3d accel_calib_biases{0, 0, 0};
     Eigen::Vector3d gyro_offsets{0, 0, 0};
 
+    QueueHandle_t imu_measurement_queue;
+
     void LinearLeastSquares(const Eigen::MatrixXd& A, const Eigen::VectorXd& b, Eigen::VectorXd& x);
+
+    static void IMUReadTaskImpl(void* _this) { ((MPUReader*)_this)->IMUReadTask(); };
+    void IMUReadTask();
     
 public:
+    MPUReader(QueueHandle_t imu_measurement_queue);
 
-    MPUReader();
+    esp_err_t Configure();
+    esp_err_t Configure(mpud::accel_fs_t kAccelFS,
+                        mpud::gyro_fs_t kGyroFS,
+                        mpud::dlpf_t kDLPF,
+                        uint16_t kSampleRate);
     void Calibrate();
-    void IMUReadTask();
-    Eigen::Vector3d GetAccel()
-    Eigen::Vector3d GetGyro()
-    float GetDeltaTime() { return kDeltaTime; }
-}
+    //https://stackoverflow.com/questions/45831114/c-freertos-task-invalid-use-of-non-static-member-function
+    void StartReadTask() { xTaskCreate(this->IMUReadTaskImpl, "IMUReadTask", 1024*14, this, 6, NULL); };
+    static float GetDeltaTime() { return kDeltaTime; };
+};
 
 #endif // MPU_READER_H
