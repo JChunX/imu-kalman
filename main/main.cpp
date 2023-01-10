@@ -27,6 +27,7 @@ Eigen::Vector3d accel_meas{0, 0, 0};
 Eigen::Vector3d gyro_meas{0, 0, 0};
 Eigen::Quaterniond q{1, 0, 0, 0};
 float roll{0}, pitch{0}, yaw{0};
+Eigen::Vector<double, 9> lin_state_vec;
 
 Eigen::Vector3d g{0, 0, -9.81};
 QueueHandle_t imu_measurement_queue;
@@ -37,10 +38,10 @@ Eigen::Matrix<double, 9, 9> get_A(double dt);
 void state_est_task(void *);
 void log_task(void *);
 Eigen::Vector3d to_euler(const Eigen::Quaterniond& q);
+
  
 extern "C" void app_main(void)
 {
-
     fflush(stdout);
     printf("Hello world!\n");
 
@@ -85,6 +86,20 @@ Eigen::Matrix<double, 9, 9> get_A(double dt)
 
 void state_est_task(void *)
 {
+
+    Eigen::Vector<double, 9> x_init = Eigen::Vector<double, 9>::Zero();
+    Eigen::Matrix<double, 9, 9> P_init = Eigen::Matrix<double, 9, 9>::Identity();Eigen::Matrix<double, 9, 9> Q_init = 0.1 * Eigen::Matrix<double, 9, 9>::Identity();
+    Eigen::Matrix<double, 3, 3> R_init = 0.1 * Eigen::Matrix<double, 3, 3>::Identity();
+    Eigen::Matrix<double, 3, 9> H = Eigen::Matrix<double, 3, 9>::Zero();
+    for (int i = 0; i<3; i++)
+    {
+        H(i,i+6) = 1;
+    }
+
+    std::function<Eigen::Matrix<double, 9, 9>(double)> A_ptr {&get_A};
+
+    KalmanFilter<9,3> kf(x_init, P_init, Q_init, R_init, A_ptr, H);
+
     Eigen::Vector3d accel_meas_raw;
     Eigen::Vector3d gyro_meas_raw;
     while (1)
@@ -95,7 +110,6 @@ void state_est_task(void *)
         {
             accel_meas_raw = imu_meas.accel_meas;
             gyro_meas_raw = imu_meas.gyro_meas;
-
             // gyro integration w/ quaternions
             double angle = gyro_meas_raw.norm() * dt;
             Eigen::Vector3d axis = gyro_meas_raw.normalized();
@@ -103,7 +117,9 @@ void state_est_task(void *)
             q = q * q_delta;
 
             // tilt correction using complementary filter
-            Eigen::Quaterniond q_accel_body(0, accel_meas_raw.x(), accel_meas_raw.y(), accel_meas_raw.z());
+            Eigen::Quaterniond q_accel_body;
+            q_accel_body.w() = 0;
+            q_accel_body.vec() = accel_meas_raw;
             Eigen::Quaterniond q_accel_world = q * q_accel_body * q.inverse();
 
             Eigen::Vector3d v_accel_world(
@@ -113,7 +129,10 @@ void state_est_task(void *)
             );
             Eigen::Vector3d n = v_accel_world.cross(Eigen::Vector3d(0, 0, 1));
             double phi = std::acos(v_accel_world.dot(Eigen::Vector3d(0, 0, 1)));
-            double alpha = 0.0;//std::max((1-0.1)/(9.81*2) * accel_meas.norm()+0.1, 0.0);
+            float alpha = std::min(std::max(
+                ((1-0.1)/(9.81*2)) * (accel_meas.norm()-9.81)+0.1, 
+            0.0),1.0);
+            //printf("%f ", alpha);
             Eigen::Quaterniond q_tilt(Eigen::AngleAxisd((1-alpha) * phi, n));
             Eigen::Quaterniond q_c = q_tilt * q;
             Eigen::Vector3d euler = to_euler(q_c);
@@ -127,8 +146,12 @@ void state_est_task(void *)
                 yaw += 360.f;
 
             q_accel_world = q_c * q_accel_body * q_c.inverse();
-            accel_meas = accel_meas_raw;//q_accel_world.vec() + g;
+            accel_meas = q_accel_world.vec();//q_accel_world.vec() + g;
             gyro_meas = gyro_meas_raw;
+
+            kf.Predict(dt);
+            kf.Update(accel_meas);
+            lin_state_vec = kf.GetState();  
         }
     }
 
@@ -141,9 +164,14 @@ void log_task(void *)
     {
         vTaskDelay(10 / portTICK_PERIOD_MS);
         ESP_LOGI(TAG, "==========================");
-        printf("%+.2f %+.2f %+.2f ", accel_meas(0), accel_meas(1), accel_meas(2));
-        printf("%+.2f %+.2f %+.2f ", gyro_meas(0), gyro_meas(1), gyro_meas(2));
-        printf("%+.2f %+.2f %+.2f\n", roll, pitch, yaw);
+        //print lin_state_vec
+        printf("%+.6f %+.6f %+.6f %+.6f %+.6f %+.6f %+.6f %+.6f %+.6f ",
+            lin_state_vec(0), lin_state_vec(1), lin_state_vec(2),
+            lin_state_vec(3), lin_state_vec(4), lin_state_vec(5),
+            lin_state_vec(6), lin_state_vec(7), lin_state_vec(8));
+        printf("%+.6f %+.6f %+.6f ", accel_meas(0), accel_meas(1), accel_meas(2));
+        printf("%+.6f %+.6f %+.6f ", gyro_meas(0), gyro_meas(1), gyro_meas(2));
+        printf("%+.6f %+.6f %+.6f\n", roll, pitch, yaw);
     }
 
 }

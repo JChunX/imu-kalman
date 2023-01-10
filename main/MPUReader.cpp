@@ -10,7 +10,10 @@ MPUReader::MPUReader(QueueHandle_t imu_measurement_queue, uint16_t sample_rate)
     : imu_measurement_queue(imu_measurement_queue),
       kSampleRate(sample_rate)
 {
-
+    gyro_lowpass_x.setup(kSampleRate, cutoff_freq_lowpass);
+    gyro_lowpass_y.setup(kSampleRate, cutoff_freq_lowpass);
+    gyro_lowpass_z.setup(kSampleRate, cutoff_freq_lowpass);
+    gyro_highpass_z.setup(kSampleRate, cutoff_freq_highpass);
 }
 
 esp_err_t MPUReader::Configure()
@@ -150,6 +153,7 @@ void MPUReader::Calibrate()
         
     }
     gyro_offsets /= gyro_samples;
+    printf("Gyro Calibration Offsets: %f, %f, %f\n", gyro_offsets[0], gyro_offsets[1], gyro_offsets[2]);
 
     ESP_LOGI(TAG, "Calibration complete");
 
@@ -237,6 +241,9 @@ void MPUReader::IMUReadTask()
 
         accel_raw_g = mpud::accelGravity(accel_raw, mpud::ACCEL_FS_4G);
         gyroRPS = mpud::gyroRadPerSec(gyro_raw, mpud::GYRO_FS_500DPS); 
+        gyroRPS.x = gyro_lowpass_x.filter(gyroRPS.x);
+        gyroRPS.y = gyro_lowpass_y.filter(gyroRPS.y);
+        gyroRPS.z = gyro_lowpass_z.filter(gyroRPS.z);
 
         if (calib_available)
         {

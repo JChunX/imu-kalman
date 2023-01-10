@@ -8,6 +8,7 @@
 #include "mpu/math.hpp"  
 #include "mpu/types.hpp"  
 #include "I2Cbus.hpp"
+#include "Iir.h"
 
 struct IMUMeasurement {
     Eigen::Vector3d accel_meas;
@@ -38,6 +39,13 @@ private:
     QueueHandle_t imu_measurement_queue;
     
     uint16_t kSampleRate = 100;
+    static constexpr int butter_order = 4;
+    static constexpr float cutoff_freq_lowpass = 20;
+    static constexpr float cutoff_freq_highpass = 1;
+    Iir::Butterworth::LowPass<butter_order> gyro_lowpass_x;
+    Iir::Butterworth::LowPass<butter_order> gyro_lowpass_y;
+    Iir::Butterworth::LowPass<butter_order> gyro_lowpass_z;
+    Iir::Butterworth::HighPass<butter_order> gyro_highpass_z;
 
     void LinearLeastSquares(const Eigen::MatrixXd& A, const Eigen::VectorXd& b, Eigen::VectorXd& x);
 

@@ -16,26 +16,31 @@ private:
     Eigen::Matrix<double, N, M> K;
 
 public:
-    KalmanFilter(const Eigen::Vector<double, N> &x_init, 
-                    const Eigen::Matrix<double, N, N> &P_init,
-                    const Eigen::Matrix<double, N, N> &Q_init,
-                    const Eigen::Matrix<double, M, M> &R_init,
-                    std::function<Eigen::Matrix<double, N, N>(double)> A_ptr,
-                    const Eigen::Matrix<double, M,N> &H);
+    KalmanFilter(
+        const Eigen::Vector<double, N> &x_init, 
+        const Eigen::Matrix<double, N, N> &P_init,
+        const Eigen::Matrix<double, N, N> &Q_init,
+        const Eigen::Matrix<double, M, M> &R_init,
+        std::function<Eigen::Matrix<double, N, N>(double)> A_ptr,
+        const Eigen::Matrix<double, M,N> &H
+    );
 
     void Predict(double dt);
     void Update(const Eigen::Vector<double, M> &z);
-    void Update(const Eigen::Vector<double, M> &z, const Eigen::Matrix<double, M, M> &R);
+    void Update(const Eigen::Vector<double, M> &z, 
+                const Eigen::Matrix<double, M, M> &R);
     Eigen::Vector<double, N> GetState();
 };
 
 template <int N, int M>
-KalmanFilter<N, M>::KalmanFilter(const Eigen::Vector<double, N> &x_init, 
-                     const Eigen::Matrix<double, N, N> &P_init,
-                     const Eigen::Matrix<double, N, N> &Q_init,
-                     const Eigen::Matrix<double, M, M> &R_init,
-                     std::function<Eigen::Matrix<double, N, N>(double)> A_ptr,
-                     const Eigen::Matrix<double, M,N> &H)
+KalmanFilter<N, M>::KalmanFilter(
+    const Eigen::Vector<double, N> &x_init, 
+    const Eigen::Matrix<double, N, N> &P_init,
+    const Eigen::Matrix<double, N, N> &Q_init,
+    const Eigen::Matrix<double, M, M> &R_init,
+    std::function<Eigen::Matrix<double, N, N>(double)> A_ptr,
+    const Eigen::Matrix<double, M,N> &H
+)
 : StateEstimator<N, M>(x_init),
     A_ptr(A_ptr),
     P(P_init),
